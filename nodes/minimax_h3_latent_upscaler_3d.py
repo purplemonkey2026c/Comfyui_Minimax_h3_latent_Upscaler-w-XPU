@@ -111,6 +111,10 @@ def _is_rocm_build():
 def _resolve_device(backend):
     if backend == "cpu":
         return torch.device("cpu")
+    if backend == "xpu":
+        if not hasattr(torch, "xpu") or not torch.xpu.is_available():
+            raise RuntimeError("XPU was selected, but torch.xpu.is_available() is False.")
+        return torch.device("xpu:0")
     if backend == "rocm":
         if not _is_rocm_build():
             raise RuntimeError("ROCm was selected, but this PyTorch build has no HIP/ROCm support.")
@@ -126,6 +130,11 @@ def _backend_label(device):
         return f"ROCm/HIP {torch.version.hip}"
     if device.type == "cuda":
         return f"CUDA {getattr(torch.version, 'cuda', None) or 'unknown'}"
+    if device.type == "xpu":
+        try:
+            return f"Intel XPU {torch.xpu.get_device_name(device)}"
+        except Exception:
+            return "Intel XPU"
     return "CPU"
 
 # ==========================================
@@ -506,7 +515,7 @@ class MinimaxH3LatentUpscaler3D(io.ComfyNode):
                                          "Disable if you run this node repeatedly to avoid reload overhead."),
 
                 # ---- 硬件 / 精度选项组 ----
-                io.Combo.Input("device", options=["cuda", "rocm", "cpu"], default="cuda"),
+                io.Combo.Input("device", options=["xpu", "cuda", "rocm", "cpu"], default="xpu"),
                 io.Combo.Input("precision", options=["fp32", "fp16", "bf16"], default="fp16"),
             ],
             outputs=[
@@ -597,14 +606,22 @@ class MinimaxH3LatentUpscaler3D(io.ComfyNode):
         out = out.to(device="cpu", dtype=orig_dtype, non_blocking=True)
 
         # 4. VRAM Management
-        if dev.type == "cuda":
+        if dev.type in ("cuda", "xpu"):
             if force_unload:
-                model.to("cpu", non_blocking=True)
-                print("[MinimaxH3-3D] ✅ Model offloaded to CPU. VRAM released.")
+                model.to("cpu")
+                print(f"[MinimaxH3-3D] Model offloaded to CPU. {dev.type.upper()} memory released.")
             if HAS_COMFY_MM:
-                mm.soft_empty_cache()
-            else:
-                torch.cuda.empty_cache()
+                try:
+                    mm.soft_empty_cache()
+                except Exception:
+                    pass
+            try:
+                if dev.type == "xpu" and hasattr(torch, "xpu"):
+                    torch.xpu.empty_cache()
+                elif dev.type == "cuda":
+                    torch.cuda.empty_cache()
+            except Exception as e:
+                print(f"[MinimaxH3-3D] Cache cleanup warning: {e}")
             gc.collect()
 
         return io.NodeOutput({"samples": out})

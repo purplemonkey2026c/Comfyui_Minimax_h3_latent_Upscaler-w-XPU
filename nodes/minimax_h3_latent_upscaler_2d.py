@@ -401,6 +401,30 @@ def load_model(name, device, precision):
           f"(every={cfg['temporal_every']}, kernel={cfg['temporal_kernel']})")
     return model
 
+def _resolve_device(backend):
+    if backend == "cpu":
+        return torch.device("cpu")
+    if backend == "xpu":
+        if not hasattr(torch, "xpu") or not torch.xpu.is_available():
+            raise RuntimeError("XPU was selected, but torch.xpu.is_available() is False.")
+        return torch.device("xpu:0")
+    if backend == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA was selected, but CUDA is unavailable.")
+        return torch.device("cuda")
+    raise ValueError(f"Unsupported device backend: {backend}")
+
+
+def _empty_device_cache(device):
+    try:
+        if device.type == "xpu" and hasattr(torch, "xpu"):
+            torch.xpu.empty_cache()
+        elif device.type == "cuda":
+            torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"[MinimaxH3] Cache cleanup warning: {e}")
+
+
 # ==========================================
 # ComfyUI 节点 (2D 版本)
 # ==========================================
@@ -413,7 +437,7 @@ class MinimaxH3LatentUpscalerNode2D:
                 "latent": ("LATENT",),
                 "model_name": (scan_models(),),
                 "scale": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 4.0, "step": 0.1}),
-                "device": (["cuda", "cpu"], {"default": "cuda"}),
+                "device": (["xpu", "cuda", "cpu"], {"default": "xpu"}),
                 "precision": (["fp32", "fp16", "bf16"], {"default": "fp32"}),
             }
         }
@@ -432,7 +456,7 @@ class MinimaxH3LatentUpscalerNode2D:
         if scale < 1.0:
             raise ValueError("仅支持放大 (scale >= 1.0)")
 
-        dev = torch.device(device if torch.cuda.is_available() else "cpu")
+        dev = _resolve_device(device)
         model = load_model(model_name, dev, precision)
 
         s = latent["samples"].clone()
@@ -463,8 +487,8 @@ class MinimaxH3LatentUpscalerNode2D:
 
         out = out.cpu().to(orig_dtype)
 
-        if dev.type == "cuda":
-            torch.cuda.empty_cache()
+        if dev.type in ("cuda", "xpu"):
+            _empty_device_cache(dev)
 
         return ({"samples": out},)
 

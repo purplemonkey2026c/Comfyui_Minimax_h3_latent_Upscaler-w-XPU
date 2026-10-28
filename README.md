@@ -1,3 +1,24 @@
+# ComfyUI Minimax H3 Latent Upscaler XPU
+
+This fork updates to include XPU support. 
+
+Specific changes:
+
+2D upscaler
+- Replaced CUDA-only device selection with explicit XPU/CUDA/CPU device resolution.
+- Removed the logic that could silently select CPU simply because CUDA was unavailable.
+- Added XPU cache cleanup support.
+- Updated the device dropdown to xpu, cuda, cpu, defaulting to xpu.
+  
+3D upscaler
+- Added explicit Intel XPU device resolution and availability checks.
+- Added XPU backend identification.
+- Added XPU cache cleanup and improved force_unload handling.
+- Retained CUDA, ROCm, and CPU options.
+- Updated the device dropdown to xpu, cuda, rocm, cpu, defaulting to xpu.
+
+#
+  
 <p align="center">
   <a href="./README.md"><strong>English</strong></a> ·
   <a href="./README_zh.md">中文</a>
